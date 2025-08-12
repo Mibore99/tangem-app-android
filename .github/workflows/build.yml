@@ -1,43 +1,52 @@
-name: Verify Tangem Open Source Integrity
+name: Verify Tangem Build Without Private Repo
 
 on:
   workflow_dispatch:
 
 jobs:
-  verify:
+  verify-build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout main project
+      - name: Checkout SDK
         uses: actions/checkout@v4
+        with:
+          repository: tangem/tangem-sdk-android
+          path: tangem-sdk-android
 
-      - name: Clone tangem-sdk-android
+      - name: Checkout App
+        uses: actions/checkout@v4
+        with:
+          repository: tangem/tangem-app-android
+          path: tangem-app-android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build SDK and publish to local Maven
+        working-directory: tangem-sdk-android
+        run: ./gradlew publishToMavenLocal --no-daemon
+
+      - name: Replace dependency version with 0.0.1
         run: |
-          git clone https://github.com/tangem/tangem-sdk-android.git
-          cd tangem-sdk-android
-          ./gradlew publishToMavenLocal
+          grep -rl 'tangemCardSdk' tangem-app-android | while read -r file; do
+            sed -i 's/[0-9]\+\.[0-9]\+\.[0-9]\+/0.0.1/g' "$file"
+          done
 
-      - name: Change artifact version to 0.0.1
+      - name: Remove maven.pkg.github.com references
         run: |
-          sed -i 's/tangemCardSdk = ".*"/tangemCardSdk = "0.0.1"/' gradle/libs.versions.toml
-          echo "Updated tangemCardSdk version to 0.0.1"
+          grep -rl 'maven.pkg.github.com' tangem-app-android | while read -r file; do
+            sed -i '/maven.pkg.github.com/d' "$file"
+          done
 
-      - name: Remove remote maven repository
+      - name: Disable network access except localhost
         run: |
-          sed -i '/maven { url "https:\/\/maven.pkg.github.com/d' settings.gradle
-          sed -i '/maven { url "https:\/\/maven.pkg.github.com/d' build.gradle
+          sudo iptables -P OUTPUT DROP
+          sudo iptables -A OUTPUT -d 127.0.0.1 -j ACCEPT
+          sudo iptables -A OUTPUT -d ::1 -j ACCEPT
 
-      - name: Remove token from local.properties
-        run: |
-          if [ -f local.properties ]; then
-            sed -i '/gpr.user/d' local.properties
-            sed -i '/gpr.key/d' local.properties
-          fi
-
-      - name: Disable network
-        run: |
-          sudo ip link set eth0 down
-          sudo ip link set wlan0 down || true
-
-      - name: Build main project without remote repo
-        run: ./gradlew assembleRelease --stacktrace
+      - name: Build App in offline mode
+        working-directory: tangem-app-android
+        run: ./gradlew assembleRelease --offline --stacktrace --no-daemon
