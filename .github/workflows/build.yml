@@ -24,6 +24,10 @@ jobs:
         run: |
           echo "gpr.user=${{ github.actor }}" >> local.properties
           echo "gpr.key=${{ secrets.GITHUB_TOKEN }}" >> local.properties
+          echo "STORE_FILE=temp.keystore" >> local.properties
+          echo "STORE_PASSWORD=tempPass" >> local.properties
+          echo "KEY_ALIAS=tempAlias" >> local.properties
+          echo "KEY_PASSWORD=tempPass" >> local.properties
 
       - name: Generate temporary keystore
         run: |
@@ -36,11 +40,6 @@ jobs:
             -storepass tempPass \
             -keypass tempPass \
             -dname "CN=Temp,O=CI,C=US"
-
-          echo "STORE_FILE=temp.keystore" >> local.properties
-          echo "STORE_PASSWORD=tempPass" >> local.properties
-          echo "KEY_ALIAS=tempAlias" >> local.properties
-          echo "KEY_PASSWORD=tempPass" >> local.properties
 
       - name: Build APK
         run: ./gradlew assembleExternal --no-daemon
