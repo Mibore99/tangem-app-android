@@ -1,4 +1,4 @@
-name: Tangem App Build with Local Artifact
+name: Android CI Build
 
 on:
   workflow_dispatch:
@@ -11,100 +11,71 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout main project
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-        cache: 'gradle'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
-    - name: Checkout tangem-sdk-android repo
-      run: |
-        git clone https://github.com/tangem/tangem-sdk-android.git
-        cd tangem-sdk-android
-        ./gradlew publishToMavenLocal
+      - name: Create local.properties
+        run: |
+          echo "gpr.user=${{ github.actor }}" >> local.properties
+          echo "gpr.key=${{ secrets.GITHUB_TOKEN }}" >> local.properties
 
-    #- name: Update tangem_dependencies.toml to use local artifact version
-    #  run: |
-    #    ls -l
-    #    sed -i 's/tangemCardSdk = ".*"/tangemCardSdk = "0.0.1"/' tangem_dependencies.toml
+      - name: Generate temporary keystore
+        run: |
+          keytool -genkeypair \
+            -keystore temp.keystore \
+            -alias tempAlias \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass tempPass \
+            -keypass tempPass \
+            -dname "CN=Temp,O=CI,C=US"
 
-    - name: Hardcode local.properties
-      run: |
-        echo "gpr.user=dummy_user" > local.properties
-        echo "gpr.key=dummy_token" >> local.properties
-        echo "sdk.dir=$ANDROID_HOME" >> local.properties
+          echo "STORE_FILE=temp.keystore" >> local.properties
+          echo "STORE_PASSWORD=tempPass" >> local.properties
+          echo "KEY_ALIAS=tempAlias" >> local.properties
+          echo "KEY_PASSWORD=tempPass" >> local.properties
 
-    - name: Cache Gradle dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          gradle-${{ runner.os }}-
+      - name: Build APK
+        run: ./gradlew assembleExternal --no-daemon
 
-    - name: Set Gradle memory options
-      run: |
-        echo "org.gradle.jvmargs=-Xmx6g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8" >> gradle.properties
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-apk
+          path: app/build/outputs/apk/external/**/*.apk
 
-    - name: Generate debug keystore
-      run: |
-        keytool -genkeypair -v \
-          -keystore $HOME/debug.keystore \
-          -alias debug \
-          -keyalg RSA \
-          -keysize 2048 \
-          -validity 10000 \
-          -storepass android \
-          -keypass android \
-          -dname "CN=Android Debug,O=Android,C=US"
+      - name: Delete old Release (if exists)
+        uses: dev-drprasad/delete-tag-and-release@v1.1
+        with:
+          tag_name: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Create fake keystore config file
-      run: |
-        mkdir -p app/src/main/assets/tangem-app-config/android/keystore/
-        echo "store_password=android" > app/src/main/assets/tangem-app-config/android/keystore/debug_keystore.properties
-        echo "key_alias=debug" >> app/src/main/assets/tangem-app-config/android/keystore/debug_keystore.properties
-        echo "key_password=android" >> app/src/main/assets/tangem-app-config/android/keystore/debug_keystore.properties
+      - name: Create Latest Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Build
+          files: app/build/outputs/apk/external/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set version info
-      run: |
-        VERSION_CODE=$(date +'%Y%m%d%H')
-        VERSION_NAME="0.0.0-local-artifact"
-        PACKAGE_NAME="com.tangem.wallet"
-        echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
-        echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
-        echo "PACKAGE_NAME=$PACKAGE_NAME" >> $GITHUB_ENV
+      - name: Generate version tag
+        id: vars
+        run: echo "tag=$(date +'%Y%m%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-    - name: Update AppConfig.kt with version info
-      run: |
-        sed -i "s|const val packageName = \".*\"|const val packageName = \"${PACKAGE_NAME}\"|" plugins/configuration/src/main/kotlin/com/tangem/plugin/configuration/model/AppConfig.kt
-        sed -i "s|const val versionCode = .*|const val versionCode = ${VERSION_CODE}|" plugins/configuration/src/main/kotlin/com/tangem/plugin/configuration/model/AppConfig.kt
-        sed -i "s|const val versionName = \".*\"|const val versionName = \"${VERSION_NAME}\"|" plugins/configuration/src/main/kotlin/com/tangem/plugin/configuration/model/AppConfig.kt
-
-    - name: Build APK
-      run: |
-        ./gradlew assembleRelease \
-          --no-daemon \
-          -Pandroid.injected.signing.store.file=$HOME/debug.keystore \
-          -Pandroid.injected.signing.store.password=android \
-          -Pandroid.injected.signing.key.alias=debug \
-          -Pandroid.injected.signing.key.password=android \
-          -PversionName=${{ env.VERSION_NAME }} \
-          -PversionCode=${{ env.VERSION_CODE }} \
-          -PpackageName=${{ env.PACKAGE_NAME }}
-
-    - name: Rename APK
-      run: |
-        mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/tangem_${{ env.VERSION_NAME }}.apk
-
-    - name: Upload APK artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: tangem-apk-local-artifact
-        path: app/build/outputs/apk/release/tangem_${{ env.VERSION_NAME }}.apk
-
+      - name: Create Historical Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: Build ${{ steps.vars.outputs.tag }}
+          files: app/build/outputs/apk/external/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
