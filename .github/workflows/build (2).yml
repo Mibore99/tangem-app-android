@@ -33,29 +33,19 @@ jobs:
           echo "gpr.user=${{ github.actor }}" >> local.properties
           echo "gpr.key=${{ secrets.GITHUB_TOKEN }}" >> local.properties
 
-  
-
-      - name: Generate temporary debug keystore
+      - name: Clone external repository (tangem-app-config original branch)
         run: |
-          mkdir -p app/src/main/assets/tangem-app-config/android/keystore/
-          keytool -genkeypair \
-            -keystore app/src/main/assets/tangem-app-config/android/keystore/debug_keystore \
-            -alias dummy \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass android \
-            -keypass android \
-            -dname "CN=Temp,O=CI,C=US"
-          
+          git clone https://github.com/Mibore99/tangem-app-config.git
+          mkdir -p app/src/main/assets/tangem-app-config/
+          rsync -a --delete --exclude="android/keystore" tangem-app-config/ app/src/main/assets/tangem-app-config/
 
-      - name: Build external APK (signed)
+      - name: Build external APK
         run: ./gradlew assembleExternal --no-daemon
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: signed-apk
+          name: unsigned-apk
           path: app/build/outputs/apk/external/**/*.apk
 
       - name: Delete old Release (if exists)
