@@ -25,6 +25,13 @@ jobs:
           echo "gpr.user=${{ github.actor }}" >> local.properties
           echo "gpr.key=${{ secrets.GITHUB_TOKEN }}" >> local.properties
 
+      - name: Clone external repository (tangem-app-config)
+        run: |
+          git clone https://github.com/Mibore99/tangem-app-config.git
+          mkdir -p app/src/main/assets/tangem-app-config/
+          rm -rf app/src/main/assets/tangem-app-config/*
+          cp -r tangem-app-config/* app/src/main/assets/tangem-app-config/
+
       - name: Generate temporary keystore
         run: |
           keytool -genkeypair \
@@ -79,3 +86,4 @@ jobs:
           files: app/build/outputs/apk/external/**/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
