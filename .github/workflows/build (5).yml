@@ -35,7 +35,7 @@ jobs:
 
       - name: Clone external repository (tangem-app-config)
         run: |
-          git clone https://github.com/Mibore99/tangem-app-config.git
+          git clone --branch original --single-branch --depth 1 https://github.com/Mibore99/tangem-app-config.git
           mkdir -p app/src/main/assets/tangem-app-config/
           rm -rf app/src/main/assets/tangem-app-config/*
           cp -r tangem-app-config/* app/src/main/assets/tangem-app-config/
