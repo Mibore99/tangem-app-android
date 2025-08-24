@@ -1,4 +1,4 @@
-name: Build APK
+name: Android CI Build
 
 on:
   workflow_dispatch:
@@ -11,59 +11,70 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set version variables
-        id: version
-        run: |
-          VERSION_CODE=${GITHUB_RUN_NUMBER}
-          VERSION_NAME="${GITHUB_RUN_NUMBER}-$(echo $GITHUB_SHA | cut -c1-7)"
-          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
-          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
-          echo "tag=$VERSION_NAME" >> $GITHUB_OUTPUT
-
-      - name: Inject versionCode/versionName into build.gradle.kts
-        run: |
-          sed -i "/defaultConfig {/a \ \ \ \ versionCode = ${VERSION_CODE}\n        versionName = \"${VERSION_NAME}\"" app/build.gradle.kts
-
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: 17
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Generate Keystore
+      - name: Create local.properties
         run: |
-          keytool -genkeypair -alias release -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=CI, OU=Dev, O=Company, L=Earth, S=World, C=US" \
-            -keypass android -storepass android -keystore release.keystore
-          echo "STORE_FILE=release.keystore" >> local.properties
-          echo "STORE_PASSWORD=android" >> local.properties
-          echo "KEY_ALIAS=release" >> local.properties
-          echo "KEY_PASSWORD=android" >> local.properties
+          echo "gpr.user=${{ github.actor }}" >> local.properties
+          echo "gpr.key=${{ secrets.GITHUB_TOKEN }}" >> local.properties
+          echo "STORE_FILE=temp.keystore" >> local.properties
+          echo "STORE_PASSWORD=tempPass" >> local.properties
+          echo "KEY_ALIAS=tempAlias" >> local.properties
+          echo "KEY_PASSWORD=tempPass" >> local.properties
+
+      - name: Generate temporary keystore
+        run: |
+          keytool -genkeypair \
+            -keystore temp.keystore \
+            -alias tempAlias \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass tempPass \
+            -keypass tempPass \
+            -dname "CN=Temp,O=CI,C=US"
 
       - name: Build APK
-        run: ./gradlew assembleExternal --stacktrace
+        run: ./gradlew assembleExternal --no-daemon
 
-      - name: Rename APK with version
-        run: |
-          mkdir -p release
-          APK_PATH=$(find app/build/outputs/apk/external -name "*.apk" | head -n 1)
-          cp "$APK_PATH" "release/Tangem-${VERSION_NAME}.apk"
-
-      - name: Upload APK
+      - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Tangem-${{ env.VERSION_NAME }}
-          path: release/Tangem-${{ env.VERSION_NAME }}.apk
+          name: built-apk
+          path: app/build/outputs/apk/external/**/*.apk
 
-      - name: Create Release
+      - name: Delete old Release (if exists)
+        uses: dev-drprasad/delete-tag-and-release@v1.1
+        with:
+          tag_name: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Latest Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Build ${{ steps.version.outputs.tag }}
-          files: release/Tangem-${{ env.VERSION_NAME }}.apk
+          tag_name: latest
+          name: Latest Build
+          files: app/build/outputs/apk/external/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate version tag
+        id: vars
+        run: echo "tag=$(date +'%Y%m%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create Historical Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: Build ${{ steps.vars.outputs.tag }}
+          files: app/build/outputs/apk/external/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
