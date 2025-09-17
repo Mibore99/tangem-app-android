@@ -1,0 +1,101 @@
+name: Android CI Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get workflow file name (without .yml)
+        id: workflow_file
+        run: |
+          filename=$(basename "${GITHUB_WORKFLOW_REF%%@*}")
+          echo "name=${filename%.yml}" >> $GITHUB_OUTPUT
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v2
+        with:
+          api-level: 34
+          build-tools: "34.0.0"
+          cmake: false
+          ndk: false
+
+      - name: Create local.properties
+        run: |
+          echo "gpr.user=${{ github.actor }}" >> local.properties
+          echo "gpr.key=${{ secrets.GITHUB_TOKEN }}" >> local.properties
+
+      - name: Clone external repository (tangem-app-config)
+        run: |
+          git clone https://github.com/Mibore99/tangem-app-config.git
+          mkdir -p app/src/main/assets/tangem-app-config/
+          rm -rf app/src/main/assets/tangem-app-config/*
+          cp -r tangem-app-config/* app/src/main/assets/tangem-app-config/
+
+      - name: Generate temporary debug keystore
+        run: |
+          mkdir -p app/src/main/assets/tangem-app-config/android/keystore/
+          keytool -genkeypair \
+            -keystore app/src/main/assets/tangem-app-config/android/keystore/debug_keystore \
+            -alias dummy \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Temp,O=CI,C=US"
+          echo "store_password=android" > app/src/main/assets/tangem-app-config/android/keystore/debug_keystore.properties
+          echo "key_alias=dummy" >> app/src/main/assets/tangem-app-config/android/keystore/debug_keystore.properties
+          echo "key_password=android" >> app/src/main/assets/tangem-app-config/android/keystore/debug_keystore.properties
+
+      - name: Build external APK (signed)
+        run: ./gradlew assembleExternal --no-daemon
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-apk
+          path: app/build/outputs/apk/external/**/*.apk
+
+      - name: Delete old Release (if exists)
+        uses: dev-drprasad/delete-tag-and-release@v1.1
+        with:
+          tag_name: latest-${{ steps.workflow_file.outputs.name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Latest Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-${{ steps.workflow_file.outputs.name }}
+          name: Latest Build (${{ steps.workflow_file.outputs.name }})
+          files: app/build/outputs/apk/external/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate version tag
+        id: vars
+        run: echo "tag=$(date +'%Y%m%d')-${{ steps.workflow_file.outputs.name }}-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create Historical Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: Build ${{ steps.vars.outputs.tag }}
+          files: app/build/outputs/apk/external/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
