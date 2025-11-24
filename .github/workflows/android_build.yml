@@ -17,6 +17,17 @@ jobs:
       packages: read
 
     steps:
+      - name: Free Disk Space
+        run: |
+          echo "Available storage before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          echo "Available storage after cleanup:"
+          df -h
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
