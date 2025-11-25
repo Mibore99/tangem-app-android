@@ -45,7 +45,9 @@ jobs:
         run: |
           echo "gpr.user=${{ github.actor }}" >> local.properties
           echo "gpr.key=${{ secrets.GITHUB_TOKEN }}" >> local.properties
-          cat local.properties
+          echo "org.gradle.caching=false" >> gradle.properties
+          echo "org.gradle.parallel=false" >> gradle.properties
+          echo "kotlin.daemon.jvm.options=-Xmx1g" >> gradle.properties
 
       - name: Generate Temporary Keystore
         run: |
@@ -62,6 +64,9 @@ jobs:
       - name: Build with Gradle
         run: |
           ./gradlew assembleExternal \
+            --no-daemon \
+            --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -XX:MaxMetaspaceSize=1g" \
             -Pandroid.injected.signing.store.file=$(pwd)/release.jks \
             -Pandroid.injected.signing.store.password=android \
             -Pandroid.injected.signing.key.alias=android_auto \
